@@ -1,5 +1,5 @@
 import requests
-from get_api_token import get_random_token
+from get_api_token import get_api_token
 
 BASE_URL = "https://e-ticket.railway.uz"
 
@@ -30,7 +30,7 @@ def get_train_availability(station_from, station_to, date):
         "Connection": "keep-alive",
         "Sec-Fetch-Dest": "empty",
         "device-type": "BROWSER",
-        "X-XSRF-TOKEN": get_random_token(),
+        "X-XSRF-TOKEN": get_api_token(),
     }
 
     payload = {
@@ -48,7 +48,7 @@ def get_train_availability(station_from, station_to, date):
     }
 
     cookies = {
-        "XSRF-TOKEN": get_random_token()
+        "XSRF-TOKEN": get_api_token()
     }
 
     response = requests.post(url, headers=headers, cookies=cookies, json=payload)

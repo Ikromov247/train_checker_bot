@@ -2,6 +2,10 @@
 
 A Telegram bot for checking train availability in Uzbekistan. The bot helps users search for available trains between cities, view seat availability, and check prices.
 
+```
+! Disclaimer
+The railway API used in this bot is not official. Please use it in a reasonable manner. 
+```
 ## Features
 
 - Select departure and destination cities from a list of major Uzbek cities
@@ -9,6 +13,7 @@ A Telegram bot for checking train availability in Uzbekistan. The bot helps user
 - View all available trains with seat information
 - Detailed seat breakdown (upper, lower, lateral seats)
 - Price information including tariffs and commission fees
+- Add a background monitoring service to check for new available seats at set intervals
 - Multilingual support (Uzbek/Russian city names)
 
 ## Setup Instructions
@@ -43,12 +48,19 @@ pip install -e .
    cp .env.example .env
    ```
 
-2. Edit the `.env` file and add your bot token:
+2. Edit the `.env` file and add your bot token and api token:
    ```
    TELEGRAM_BOT_TOKEN=your_actual_bot_token_here
    ```
 
    Replace `your_actual_bot_token_here` with the token you got from BotFather.
+
+   ```
+   API_TOKEN=your_api_token
+   ```
+
+   Open the website http://e-ticket.railway.uz, go to Dev tools -> Storage -> Cookies -> e-ticket.railway.uz. 
+   The token should be named `XSRF-TOKEN`.
 
 ### 4. Run the Bot
 
@@ -93,6 +105,7 @@ train_checker_bot/
    - Duration
    - Total route (start and end stations)
    - Available car types with seat counts and prices
+6. **Add monitoring**: When the bot shows you all available trains, you can tell it to monitor this route for new trains. When new trains are available, you will get a notification. View active monitoring tasks with `/monitors`
 
 ## Supported Cities
 
@@ -112,12 +125,6 @@ train_checker_bot/
 - Margilon
 - Pop
 - Namangan
-
-## API Information
-
-The bot uses the official Uzbekistan Railways e-ticket API:
-- Base URL: `https://e-ticket.railway.uz`
-- Endpoint: `/api/v3/trains/availability/space/between/stations`
 
 ## Development
 
