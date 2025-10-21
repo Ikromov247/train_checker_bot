@@ -65,7 +65,7 @@ pip install -e .
 ### 4. Run the Bot
 
 ```bash
-python telegram_bot.py
+python src/telegram_bot.py
 ```
 
 You should see a message like:
@@ -83,10 +83,11 @@ INFO:__main__:Starting bot...
 
 ```
 train_checker_bot/
-├── telegram_bot.py      # Main bot application
-├── get_trains.py        # API handler for train data
-├── json_parser.py       # JSON parser for train information
-├── city_data.py         # City mappings and station codes
+├── src/
+   ├── telegram_bot.py      # Main bot application
+   ├── get_trains.py        # API handler for train data
+   ├── json_parser.py       # JSON parser for train information
+   ├── city_data.py         # City mappings and station codes
 ├── .env                 # Environment variables (not in git)
 ├── .env.example         # Example environment file
 ├── pyproject.toml       # Project dependencies
