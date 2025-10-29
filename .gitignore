@@ -15,3 +15,5 @@ wheels/
 dev_files/
 
 *.db
+sandbox*
+output.log

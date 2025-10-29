@@ -44,7 +44,7 @@ def get_train_availability(station_from, station_to, date):
         "stationFrom": str(station_from),
         "stationTo": str(station_to),
         "detailNumPlaces": 1,
-        "showWithoutPlaces": 0
+        "showWithoutPlaces": 1  # Include sold-out trains
     }
 
     cookies = {

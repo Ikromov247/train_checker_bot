@@ -84,6 +84,58 @@ def extract_train_info(data: dict) -> List[Dict[str, Any]]:
     return result
 
 
+def extract_sold_out_trains(data: dict, limit: int = 3) -> List[Dict[str, Any]]:
+    """
+    Extract sold-out trains (basic info only).
+
+    Args:
+        data: API response JSON data
+        limit: Maximum number of sold-out trains to return
+
+    Returns:
+        List of dictionaries containing basic sold-out train information
+    """
+    if data['hasError']:
+        raise ValueError("API returned error")
+
+    result = []
+    direction = data['direction'][0]
+
+    for train_group in direction['trains']:
+        for train_data in train_group['train']:
+            # Only include trains with NO available seats
+            if train_data['places']['cars']:
+                continue
+
+            # Extract route information
+            route_start = train_data['route']['station'][0]
+            route_end = train_data['route']['station'][-1]
+
+            # Build basic train info
+            train_info = {
+                'trainNumber': train_data['number'],
+                'brand': train_data['brand'],
+                'departureTime': train_data['departure']['localTime'],
+                'arrivalTime': train_data['arrival']['localTime'],
+                'timeInWay': train_data['timeInWay'],
+                'route': {
+                    'from': route_start,
+                    'to': route_end
+                },
+                'soldOut': True
+            }
+
+            result.append(train_info)
+
+            if len(result) >= limit:
+                break
+
+        if len(result) >= limit:
+            break
+
+    return result
+
+
 def format_train_info_readable(trains: List[Dict[str, Any]]) -> str:
     """
     Format train information into a human-readable string.
@@ -99,38 +151,66 @@ def format_train_info_readable(trains: List[Dict[str, Any]]) -> str:
 
     output = []
     for i, train in enumerate(trains, 1):
-        output.append(f"\n{'='*30}")
-        output.append(f"Train #{i}: {train['trainNumber']} ({train['brand']})")
-        output.append(f"{'='*30}")
-        output.append(f"Departure: {train['departureTime']} ({train['departureDate']})")
-        output.append(f"Arrival: {train['arrivalTime']} ({train['arrivalDate']})")
-        output.append(f"Duration: {train['timeInWay']}")
-        output.append(f"\nAvailable cars:")
+        # Header with train number and brand
+        output.append(f"\n🚂 Train {train['trainNumber']} • {train['brand']}")
+        output.append(f"{'─' * 35}")
+
+        # Time and duration
+        output.append(f"🕐 {train['departureTime']} → {train['arrivalTime']} ({train['timeInWay']})")
+        output.append(f"📅 {train['departureDate']}")
+        output.append(f"🛤️  {train['route']['from']} → {train['route']['to']}")
+
+        # Available cars section
+        output.append(f"\n💺 Available seats:")
 
         for car in train['cars']:
-            output.append(f"\n  {car['type']}:")
-            output.append(f"    Total seats: {car['freeSeats']}")
-            output.append(f"    Price: {car['price']:,} so'm")
+            # Car type header with total seats and price
+            output.append(f"\n  ▪️ {car['type']} — {car['freeSeats']} seats")
+            output.append(f"     💰 {car['price']:,} so'm")
 
-            # Show seat breakdown
+            # Show seat breakdown in compact form
             breakdown = car['seatBreakdown']
-            seats_detail = []
-            if breakdown['seatsUndef']:
-                seats_detail.append(f"Undefined: {breakdown['seatsUndef']}")
-            if breakdown['seatsDn']:
-                seats_detail.append(f"Lower: {breakdown['seatsDn']}")
-            if breakdown['seatsUp']:
-                seats_detail.append(f"Upper: {breakdown['seatsUp']}")
-            if breakdown['seatsLateralDn']:
-                seats_detail.append(f"Lateral lower: {breakdown['seatsLateralDn']}")
-            if breakdown['seatsLateralUp']:
-                seats_detail.append(f"Lateral upper: {breakdown['seatsLateralUp']}")
+            seats_parts = []
 
-            if seats_detail:
-                output.append(f"    Breakdown: {', '.join(seats_detail)}")
-        
-        output.append(f"Route: {train['route']['from']} → {train['route']['to']}")
-    
+            if breakdown['seatsDn'] and str(breakdown['seatsDn']) != '0':
+                seats_parts.append(f"⬇️{breakdown['seatsDn']}")
+            if breakdown['seatsUp'] and str(breakdown['seatsUp']) != '0':
+                seats_parts.append(f"⬆️{breakdown['seatsUp']}")
+            if breakdown['seatsLateralDn'] and str(breakdown['seatsLateralDn']) != '0':
+                seats_parts.append(f"🔽{breakdown['seatsLateralDn']}")
+            if breakdown['seatsLateralUp'] and str(breakdown['seatsLateralUp']) != '0':
+                seats_parts.append(f"🔼{breakdown['seatsLateralUp']}")
+            if breakdown['seatsUndef']:
+                seats_parts.append(f"📍{breakdown['seatsUndef']}")
+
+            if seats_parts:
+                output.append(f"     {' | '.join(seats_parts)}")
+
+    return '\n'.join(output)
+
+
+def format_sold_out_trains(trains: List[Dict[str, Any]]) -> str:
+    """
+    Format sold-out train information into a compact string.
+
+    Args:
+        trains: List of sold-out train information dictionaries
+
+    Returns:
+        Formatted string with basic train details
+    """
+    if not trains:
+        return ""
+
+    output = ["\n\n❌ Sold-out trains (can be monitored):"]
+    output.append("─" * 35)
+
+    for train in trains:
+        output.append(
+            f"\n🚃 {train['trainNumber']} • {train['brand']}\n"
+            f"   🕐 {train['departureTime']} → {train['arrivalTime']} ({train['timeInWay']})"
+        )
+
     return '\n'.join(output)
 
 

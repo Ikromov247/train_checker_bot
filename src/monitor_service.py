@@ -20,23 +20,50 @@ DB_PATH = Path("train_monitors.db")
 async def init_database():
     """Initialize the database schema."""
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS monitors (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                chat_id INTEGER NOT NULL,
-                station_from TEXT NOT NULL,
-                station_to TEXT NOT NULL,
-                travel_date TEXT NOT NULL,
-                check_interval INTEGER NOT NULL,
-                last_check TIMESTAMP,
-                known_trains TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                active BOOLEAN DEFAULT 1
-            )
-        """)
-        await db.commit()
-        logger.info("Database initialized")
+        # Check if table exists and if we need to migrate
+        cursor = await db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='monitors'"
+        )
+        table_exists = await cursor.fetchone()
+
+        if table_exists:
+            # Check if new columns exist
+            cursor = await db.execute("PRAGMA table_info(monitors)")
+            columns = await cursor.fetchall()
+            column_names = [col[1] for col in columns]
+
+            # Add new columns if they don't exist
+            if 'monitor_type' not in column_names:
+                await db.execute("ALTER TABLE monitors ADD COLUMN monitor_type TEXT DEFAULT 'route'")
+            if 'train_number' not in column_names:
+                await db.execute("ALTER TABLE monitors ADD COLUMN train_number TEXT")
+            if 'car_types' not in column_names:
+                await db.execute("ALTER TABLE monitors ADD COLUMN car_types TEXT")
+
+            await db.commit()
+            logger.info("Database migrated with new columns")
+        else:
+            # Create new table with all columns
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS monitors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    station_from TEXT NOT NULL,
+                    station_to TEXT NOT NULL,
+                    travel_date TEXT NOT NULL,
+                    check_interval INTEGER NOT NULL,
+                    monitor_type TEXT DEFAULT 'route',
+                    train_number TEXT,
+                    car_types TEXT,
+                    last_check TIMESTAMP,
+                    known_trains TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active BOOLEAN DEFAULT 1
+                )
+            """)
+            await db.commit()
+            logger.info("Database initialized")
 
 
 async def add_monitor(
@@ -45,16 +72,24 @@ async def add_monitor(
     station_from: str,
     station_to: str,
     travel_date: str,
-    check_interval: int
+    check_interval: int,
+    train_number: str = None,
+    car_types: List[str] = None
 ) -> int:
     """
     Add a new monitor to the database.
     Initializes known_trains with current available trains.
 
+    Args:
+        train_number: Optional train number for train-specific monitoring
+        car_types: Optional list of car types to monitor (e.g., ['Купе', 'Плацкартный'])
+
     Returns:
         Monitor ID
     """
     import json
+
+    monitor_type = 'train' if train_number else 'route'
 
     # Get current trains to initialize known_trains
     initial_trains = []
@@ -62,8 +97,15 @@ async def add_monitor(
         data = get_train_availability(station_from, station_to, travel_date)
         if not data.get('hasError'):
             current_trains = extract_train_info(data)
-            initial_trains = [t['trainNumber'] for t in current_trains]
-            logger.info(f"Initialized monitor with {len(initial_trains)} existing trains")
+
+            if train_number:
+                # For train-specific monitoring, only track this train
+                initial_trains = [train_number] if any(t['trainNumber'] == train_number and t.get('cars') for t in current_trains) else []
+            else:
+                # For route monitoring, track all trains with seats
+                initial_trains = [t['trainNumber'] for t in current_trains]
+
+            logger.info(f"Initialized {monitor_type} monitor with {len(initial_trains)} existing trains")
     except Exception as e:
         logger.warning(f"Could not fetch initial trains for monitor: {e}")
         # Continue with empty list
@@ -73,15 +115,18 @@ async def add_monitor(
             """
             INSERT INTO monitors (
                 user_id, chat_id, station_from, station_to,
-                travel_date, check_interval, known_trains
+                travel_date, check_interval, monitor_type, train_number,
+                car_types, known_trains
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, chat_id, station_from, station_to, travel_date, check_interval, json.dumps(initial_trains))
+            (user_id, chat_id, station_from, station_to, travel_date, check_interval,
+             monitor_type, train_number, json.dumps(car_types) if car_types else None,
+             json.dumps(initial_trains))
         )
         await db.commit()
         monitor_id = cursor.lastrowid
-        logger.info(f"Added monitor {monitor_id} for user {user_id}")
+        logger.info(f"Added {monitor_type} monitor {monitor_id} for user {user_id}")
         return monitor_id
 
 
@@ -166,12 +211,13 @@ async def cleanup_expired_monitors():
 
 async def check_monitor(monitor: Dict[str, Any], bot) -> List[Dict[str, Any]]:
     """
-    Check a single monitor for new trains.
+    Check a single monitor for new trains or seats.
 
     Returns:
-        List of new trains that appeared
+        List of new trains/seats that appeared
     """
     import json
+    from json_parser import extract_sold_out_trains
 
     try:
         # Fetch current train data
@@ -185,21 +231,62 @@ async def check_monitor(monitor: Dict[str, Any], bot) -> List[Dict[str, Any]]:
             logger.warning(f"API error for monitor {monitor['id']}")
             return []
 
+        monitor_type = monitor.get('monitor_type', 'route')
+        train_number = monitor.get('train_number')
+        car_types = json.loads(monitor.get('car_types') or 'null')
+
         # Extract current trains
         current_trains = extract_train_info(data)
-        current_train_numbers = {t['trainNumber'] for t in current_trains}
 
-        # Load known trains
-        known_train_numbers = set(json.loads(monitor['known_trains'] or '[]'))
+        # For train-specific monitoring, also check sold-out trains
+        if monitor_type == 'train' and train_number:
+            sold_out_trains = extract_sold_out_trains(data, limit=100)  # Get all
+            # Check if the monitored train is now available
+            target_train = next((t for t in current_trains if t['trainNumber'] == train_number), None)
 
-        # Find new trains
-        new_train_numbers = current_train_numbers - known_train_numbers
-        new_trains = [t for t in current_trains if t['trainNumber'] in new_train_numbers]
+            # If train was sold out but now has seats
+            known_trains = json.loads(monitor['known_trains'] or '[]')
+            was_sold_out = train_number not in known_trains
 
-        # Update known trains
-        await update_monitor_check(monitor['id'], list(current_train_numbers))
+            if target_train and was_sold_out:
+                # Filter by car types if specified
+                if car_types:
+                    filtered_cars = [car for car in target_train['cars'] if car['type'] in car_types]
+                    if filtered_cars:
+                        target_train = target_train.copy()
+                        target_train['cars'] = filtered_cars
+                        await update_monitor_check(monitor['id'], [train_number])
+                        return [target_train]
+                    else:
+                        # Train has seats but not in the desired car types
+                        await update_monitor_check(monitor['id'], known_trains)
+                        return []
+                else:
+                    # No car type filter, any seats trigger notification
+                    await update_monitor_check(monitor['id'], [train_number])
+                    return [target_train]
 
-        return new_trains
+            # If train still has seats, keep it in known_trains
+            if target_train:
+                await update_monitor_check(monitor['id'], [train_number])
+            else:
+                await update_monitor_check(monitor['id'], [])
+
+            return []
+
+        # Route monitoring (original logic)
+        else:
+            current_train_numbers = {t['trainNumber'] for t in current_trains}
+            known_train_numbers = set(json.loads(monitor['known_trains'] or '[]'))
+
+            # Find new trains
+            new_train_numbers = current_train_numbers - known_train_numbers
+            new_trains = [t for t in current_trains if t['trainNumber'] in new_train_numbers]
+
+            # Update known trains
+            await update_monitor_check(monitor['id'], list(current_train_numbers))
+
+            return new_trains
 
     except Exception as e:
         logger.error(f"Error checking monitor {monitor['id']}: {e}")
