@@ -34,14 +34,14 @@ def extract_train_info(data: dict) -> List[Dict[str, Any]]:
             # Extract car information
             cars_info = []
             for car in train_data['places']['cars']:
-                # Get first tariff (usually there's only one)
-                tariff_data = car['tariffs']['tariff'][0] if car['tariffs']['tariff'] else None
+                # Process ALL tariffs (for Afrosiyob trains with 1C and 2E classes)
+                tariff_list = car['tariffs']['tariff'] if car['tariffs']['tariff'] else []
 
-                if tariff_data:
+                for tariff_data in tariff_list:
                     # Calculate price (tariff + comissionFee)
                     price = int(tariff_data['tariff']) + int(tariff_data['comissionFee'])
 
-                    # Extract seat details
+                    # Extract seat details from this specific tariff
                     seats = tariff_data['seats']
                     seat_breakdown = {
                         'seatsUndef': seats.get('seatsUndef'),
@@ -51,9 +51,19 @@ def extract_train_info(data: dict) -> List[Dict[str, Any]]:
                         'seatsLateralUp': seats.get('seatsLateralUp')
                     }
 
+                    # Calculate actual free seats for this tariff
+                    tariff_seats = 0
+                    for key, value in seat_breakdown.items():
+                        if value and str(value) != '0':
+                            tariff_seats += int(value)
+
+                    # Get class service type (1C, 2E, etc.)
+                    class_service = tariff_data.get('classService', {}).get('type', '')
+
                     car_info = {
                         'type': car['type'],
-                        'freeSeats': int(car['freeSeats']),
+                        'classService': class_service,  # 1C (business) or 2E (economy)
+                        'freeSeats': tariff_seats,  # Actual seats for this tariff
                         'seatBreakdown': seat_breakdown,
                         'price': price
                     }
@@ -164,8 +174,18 @@ def format_train_info_readable(trains: List[Dict[str, Any]]) -> str:
         output.append(f"\n💺 Available seats:")
 
         for car in train['cars']:
-            # Car type header with total seats and price
-            output.append(f"\n  ▪️ {car['type']} — {car['freeSeats']} seats")
+            # Car type header with class service, total seats and price
+            class_label = ""
+            if car.get('classService'):
+                class_type = car['classService']
+                if class_type == '1С' or class_type == '1C':
+                    class_label = " [Business Class]"
+                elif class_type == '2Е' or class_type == '2E':
+                    class_label = " [Economy]"
+                else:
+                    class_label = f" [{class_type}]"
+
+            output.append(f"\n  ▪️ {car['type']}{class_label} — {car['freeSeats']} seats")
             output.append(f"     💰 {car['price']:,} so'm")
 
             # Show seat breakdown in compact form
